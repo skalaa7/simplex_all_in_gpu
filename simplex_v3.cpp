@@ -10,7 +10,7 @@
 #define NUMOFSLACK NUM
 #define ROWSIZE (NUMOFSLACK+1)
 #define COLSIZE (NUMOFSLACK+NUMOFVAR+1)
-//#define FOR_PERIOD 6000
+#define FOR_PERIOD 100
 using namespace std;
 float var[2*NUMOFVAR];
 float optim[2];
@@ -224,7 +224,7 @@ void simplexCalculate(float wv[ROWSIZE*COLSIZE])
             unbounded=true;
             break;
         }
-
+	cout<<"here"<<endl;
 
         pivotRow=findPivotRow(wv,pivotCol);
 
@@ -307,12 +307,12 @@ int main(int argc, char *argv[])
 	
 	  cl::Program prog_pivot(context, cl_util::load_prog("pivot.cl"), true);
 	  
-	  cl::make_kernel< int, int, cl::Buffer, cl::Buffer, cl::Buffer,cl::Buffer> pivoting(prog_pivot, "pivot");
+	  //cl::make_kernel< int, int, cl::Buffer, cl::Buffer, cl::Buffer,cl::Buffer> pivoting(prog_pivot, "pivot");
 	  
 	  cl::Program prog_simplex_calc(context, cl_util::load_prog("simplex_calc.cl"), true);
-	 
-	  cl::make_kernel< int, int, cl::Buffer, cl::Buffer, cl::Buffer,cl::Buffer> simplex_calc(prog_simplex_calc, "simplex_calc");
-	  
+	 cl::Kernel pivoting = cl::Kernel(prog_pivot,"pivot");
+	  //cl::make_kernel< int, int, cl::Buffer, cl::Buffer, cl::Buffer,cl::Buffer> simplex_calc(prog_simplex_calc, "simplex_calc");
+	  cl::Kernel simplex_calc = cl::Kernel(prog_simplex_calc,"simplex_calc");
 	  cout << "------------------------------------------------------------" << endl;
 	  cout << "-- OpenCL row on work item                                --" << endl;
 	  cout << "------------------------------------------------------------" << endl;
@@ -323,7 +323,19 @@ int main(int argc, char *argv[])
 	 makeMatrix(wv);
 	
 	int opti_unb_pr[3]={0,0,0};
+    	simplex_calc.setArg(0,ROWSIZE);
+    	simplex_calc.setArg(1,COLSIZE);
+    	simplex_calc.setArg(2,b_newRow);
+    	simplex_calc.setArg(3,b_pivotColVal);
+    	simplex_calc.setArg(4,b_wv);
+    	simplex_calc.setArg(5,b_opti_unb_pr);
     	
+    	pivoting.setArg(0,ROWSIZE);
+    	pivoting.setArg(1,COLSIZE);
+    	pivoting.setArg(2,b_newRow);
+    	pivoting.setArg(3,b_pivotColVal);
+    	pivoting.setArg(4,b_wv);
+    	pivoting.setArg(5,b_opti_unb_pr);
 	queue.enqueueWriteBuffer(b_wv,CL_TRUE,0,sizeof(float) * ROWSIZE*COLSIZE,wv);
     #ifdef FOR_PERIOD
     	for(int i =0;i<FOR_PERIOD;i++)
@@ -333,12 +345,14 @@ int main(int argc, char *argv[])
     {	//start2 = omp_get_wtime();
     	//start2 = omp_get_wtime();
     	count[1]++;
-    	simplex_calc(cl::EnqueueArgs(queue, cl::NDRange(1)), ROWSIZE, COLSIZE, b_newRow, b_pivotColVal, b_wv,b_opti_unb_pr);
+    	//simplex_calc(cl::EnqueueArgs(queue, cl::NDRange(1)), ROWSIZE, COLSIZE, b_newRow, b_pivotColVal, b_wv,b_opti_unb_pr);
+    	queue.enqueueNDRangeKernel(simplex_calc,cl::NullRange,cl::NDRange(1));
     	queue.finish();
     	cl::copy(queue, b_opti_unb_pr, opti_unb_pr, opti_unb_pr+2);
     	if(opti_unb_pr[0] || opti_unb_pr[1])
     		break;
-    	pivoting(cl::EnqueueArgs(queue, cl::NDRange(ROWSIZE)),ROWSIZE, COLSIZE, b_newRow, b_pivotColVal, b_wv,b_opti_unb_pr);
+    	queue.enqueueNDRangeKernel(pivoting,cl::NullRange,cl::NDRange(ROWSIZE));
+    	//pivoting(cl::EnqueueArgs(queue, cl::NDRange(ROWSIZE)),ROWSIZE, COLSIZE, b_newRow, b_pivotColVal, b_wv,b_opti_unb_pr);
 	queue.finish();
 	//elapsed2  += omp_get_wtime() - start2;
     }
